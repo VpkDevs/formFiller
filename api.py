@@ -1,7 +1,11 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from pydantic import BaseModel, validator
 from typing import Dict, Optional
+from .database import Database, get_user_by_email, save_user_to_db
+from .email_service import send_verification_email
+from .database import Database, get_user_by_email, save_user_to_db
 from .utils.validator import DataValidator
+import random
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -80,10 +84,17 @@ async def register_user(user: UserRegistration, request: Request, response: Resp
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        # Check if user already exists (pseudo-code)
-        # existing_user = await get_user_by_email(user.email)
-        # if existing_user:
-        #     raise HTTPException(status_code=400, detail="User already exists")
+        with Database("your_connection_string_here").session() as session:
+            existing_user = get_user_by_email(session, user.email)
+            if existing_user:
+                raise HTTPException(status_code=400, detail="User already exists")
+        
+        # Hash the password
+        import bcrypt
+        hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt())
+        
+        # Save user to the database
+        save_user_to_db(session, username=user.username, email=user.email, password=hashed_password.decode('utf-8'))
 
         # Hash the password (pseudo-code)
         # hashed_password = hash_password(user.password)
@@ -99,8 +110,11 @@ async def register_user(user: UserRegistration, request: Request, response: Resp
         session_token = "generate_session_token()"
         response.set_cookie(SESSION_TOKEN, session_token, httponly=True, samesite="none", secure=True)
 
-        # Send verification email (pseudo-code)
-        # send_verification_email(user.email)
+        # Generate OTP (for demonstration purposes, using a simple random number)
+        otp = str(random.randint(100000, 999999))
+        
+        # Send verification email
+        send_verification_email(user.email, otp)
 
         audit_log(event="User registration", username=user.username, email=user.email, ip=request.client.host)
         return {"message": "User registered successfully. Please check your email for OTP and verification."}
